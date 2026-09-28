@@ -1,80 +1,117 @@
-# Databricks App Templates
+# Databricks Agentic AI — Product Assistant
 
-Pre-built templates for creating [Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/).
+An end-to-end **agentic AI** solution built entirely on Databricks: a Unity Catalog vector index + two UC functions are wired up as **tools** for an LLM agent, the agent is registered and deployed to a Model Serving endpoint, and a **Databricks App** (chat UI) is deployed in front of it for end users.
 
-See [Create an App from a Template](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/create-app-template) to get started.
+This repo currently hosts one use case — **Products** — built from the [`e2e-chatbot-app-next`](./e2e-chatbot-app-next) chat UI template.
 
-## Templates
+## Architecture
 
-### Hello World
+![End-to-end architecture](screenshots/01-architecture-overview.png)
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `streamlit-hello-world-app` | Simple Streamlit app | None |
-| `dash-hello-world-app` | Simple Dash app | None |
-| `gradio-hello-world-app` | Simple Gradio app | None |
-| `shiny-hello-world-app` | Simple Shiny app | None |
-| `flask-hello-world-app` | Simple Flask app | None |
-| `nodejs-fastapi-hello-world-app` | Simple Node.js app | None |
+```
+PDF ──► Volumes ──► RAG ──► Vector Search endpoint ──► Vector index ─┐
+                                                                      │
+data files (csv/txt) ──► Delta table ──► UC function ────────────────┤
+                                                                      ▼
+                                                          AI Agent (LLM + tools)
+                                                          1. Vector index (product_index)
+                                                          2. UC functions (policy, customer data)
+                                                                      │
+                                                                      ▼
+                                                        Register + Deploy (MLflow)
+                                                                      │
+                                                                      ▼
+                                                             Model Serving endpoint
+                                                                      │
+                                                                      ▼
+                                                   Databricks App (chat-ui-for-existing-agent)
+```
 
-### Agents
+The agent has three tools available to it at inference time:
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `agent-langgraph` | A conversational agent using LangGraph and MLflow AgentServer | MLflow experiment |
-| `agent-langgraph-advanced` | LangGraph agent with short-term memory, long-term memory, and long-running background tasks | MLflow experiment, Database |
-| `agent-openai-agents-sdk` | A conversational agent using OpenAI Agents SDK and MLflow AgentServer | MLflow experiment |
-| `agent-openai-advanced` | OpenAI Agents SDK agent with short-term memory and long-running background tasks | MLflow experiment, Database |
-| `agent-openai-agents-sdk-multiagent` | Multi-agent orchestrator using OpenAI Agents SDK with Genie and serving endpoint subagents | MLflow experiment |
-| `agent-non-conversational` | A non-conversational agent that processes structured questions and provides answers with detailed reasoning | MLflow experiment |
-| `agent-migration-from-model-serving` | Template for migrating a ResponsesAgent from Model Serving to Databricks Apps | MLflow experiment |
-| `e2e-chatbot-app-next` | A chat UI that queries a remote agent endpoint or foundation model | Serving endpoint |
-| `mcp-server-hello-world` | A basic MCP server | None |
-| `mcp-server-open-api-spec` | An MCP server that exposes REST API operations from an OpenAPI specification stored in a Unity Catalog volume | UC volume |
+1. **Vector search** over `product_index` — semantic retrieval of product info.
+2. **UC function 1** — reads a policy reference file for return/shipping/warranty policy answers.
+3. **UC function 2** — reads customer service data for order/customer lookups.
 
-### Dashboard
+## Data pipeline: building the product knowledge base
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `streamlit-data-app` | An app that reads from a SQL warehouse and visualizes data | SQL warehouse |
-| `dash-data-app` | An app that reads from a SQL warehouse and visualizes data | SQL warehouse |
-| `gradio-data-app` | An app that reads from a SQL warehouse and visualizes data | SQL warehouse |
-| `shiny-data-app` | An app that reads from a SQL warehouse and visualizes data | SQL warehouse |
+![Product master pipeline](screenshots/02-product-master-pipeline.png)
 
-### Database
+Two source tables are combined into a single denormalized `product_master` table, which is then synced to a Databricks Vector Search index:
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `streamlit-database-app` | A todo app that stores tasks in a Postgres database hosted on Databricks | Database |
-| `dash-database-app` | A todo app that stores tasks in a Postgres database hosted on Databricks | Database |
-| `flask-database-app` | A todo app that stores tasks in a Postgres database hosted on Databricks | Database |
+| Source | Columns |
+|---|---|
+| `products` | `product_name`, `product_desc` |
+| `product_dimension` (static reference table) | `product_id`, `product_name`, `product_category`, `product_sub_category` |
 
-### AppKit
+These are joined into **`product_master`**:
 
-A collection of templates for building full-stack Databricks Apps with [AppKit](https://github.com/databricks/appkit).
+- `product_id`, `product_name`, `product_desc`, `product_category`, `product_sub_category`
+- `product_combined` — a single XML-tagged text column (`<productname>...</productname><productdesc>...</productdesc>...`) used as the embedding source for the vector index
 
-<!-- appkit-start -->
+`product_master` is synced (Delta Sync, triggered) into the **`product_index`** Vector Search index, served by `ai_search_endpoint`.
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `appkit-all-in-one` | Full-stack Node.js app with SQL analytics dashboards, file browser, Genie AI conversations, Lakebase Autoscaling (Postgres) CRUD, and Model Serving | SQL warehouse, Volume, Genie Space, Database, Serving Endpoint |
-| `appkit-analytics` | Node.js app with SQL analytics dashboards and charts | SQL warehouse |
-| `appkit-genie` | Node.js app with AI/BI Genie for natural language data queries | Genie Space |
-| `appkit-files` | Node.js app with file browser for Databricks Volumes | Volume |
-| `appkit-serving` | Node.js app with Databricks Model Serving endpoint integration | Serving Endpoint |
-| `appkit-lakebase` | Node.js app with Lakebase Autoscaling (Postgres) CRUD operations | Database |
+## Tools: Unity Catalog functions
 
-<!-- appkit-end -->
+![UC function tools](screenshots/04-uc-function-tools.png)
 
-### Showcase Examples
+| Source | UC function | Purpose |
+|---|---|---|
+| Policy static file | `uc fn1` | Answers policy questions (returns, shipping, warranty) |
+| Customer service static table | `uc fn2` | Looks up customer/order data |
 
-End-to-end example apps that bundle a full Databricks App with seed data, SQL queries, and (where applicable) Lakeflow pipelines and provisioning scripts. See each template's `README.md` for the runbook.
+Both functions, plus the `product_index` vector index, are registered as tools on the agent (`AI agent = LLM + tools`).
 
-| Template | Description | Dependencies |
-|----------|-------------|--------------|
-| `agentic-support-console` | End-to-end AI-powered support console combining Lakebase, Lakehouse Sync, a medallion pipeline, an LLM agent job, reverse sync, and a Databricks App with Genie analytics. | SQL warehouse, Database, Genie Space, MLflow experiment |
-| `content-moderator` | Internal content moderation tool with per-channel guidelines, AI-powered compliance scoring via Model Serving, and a moderator review workflow backed by Lakebase and Genie analytics. | SQL warehouse, Database, Genie Space, Serving endpoint |
-| `inventory-intelligence` | Retail inventory management with AI-powered demand forecasting, replenishment recommendations, and optional Genie analytics. Built on a live medallion pipeline synced to Lakebase. | SQL warehouse, Database, Genie Space |
-| `rag-chat` | Streaming Retrieval-Augmented Generation chat app with pgvector retrieval from Lakebase, Wikipedia seed corpus, Model Serving generation, and Lakebase-backed chat history. Consumed via `databricks apps init`. | Database, Serving endpoint |
-| `saas-tracker` | Internal tool for tracking team SaaS subscriptions, owners, costs, and renewals with Lakebase persistence and Genie spend analytics. | SQL warehouse, Database, Genie Space |
-| `vacation-rentals` | Vacation rental ops dashboard with revenue analytics from a SQL Warehouse, a booking queue with Lakebase-backed flags and agent notes, and an embedded Genie chat panel. | SQL warehouse, Database, Genie Space |
+## Unity Catalog layout
+
+Everything lives under a single UC schema, `uc_agentic_ai.agentic_ai_schema`:
+
+![Catalog Explorer](screenshots/09-catalog-schema.png)
+
+| Object | Type | Notes |
+|---|---|---|
+| `products` | Table | Raw product name/description |
+| `product_dimension` | Table | Static product category reference |
+| `product_master` | Table | Denormalized product table (source for the vector index) |
+| `product_index` | Vector index | 553 rows, Delta Sync, online |
+| `policies` | Table | Source for UC function 1 |
+| `cust_service_data` | Table | Source for UC function 2 |
+| `data_files` | Volume | Raw file landing zone (PDFs, csv, txt) |
+
+`product_master` sample data — structured columns and the combined embedding column used by the vector index:
+
+![product_master sample data](screenshots/10-product-master-sample-data.png)
+![product_master combined column](screenshots/11-product-master-combined-column.png)
+
+Querying the deployed index directly (hybrid search over `product_combined`):
+
+![Vector index overview and query](screenshots/12-vector-index-overview-and-query.png)
+
+## Agent: register, deploy, serve
+
+The agent (`sai_agent`) is registered via MLflow and deployed as a Model Serving endpoint (`agents_uc_agentic_ai-agentic_ai_schema-sai_agent_model`, task: **Agent (Responses)**).
+
+![Agents](screenshots/07-agents-list.png)
+![Serving endpoints](screenshots/08-serving-endpoints.png)
+
+## Chat UI: Databricks App
+
+The serving endpoint is fronted by a **Databricks App** deployed from the [`e2e-chatbot-app-next`](./e2e-chatbot-app-next) template, pointed at the existing agent endpoint instead of provisioning a new one.
+
+![App overview](screenshots/06-app-overview.png)
+
+In the chat, tool calls the agent makes (e.g. a `product_index` vector search) are shown inline with their parameters and raw results, so you can see exactly what the agent retrieved before it answers:
+
+![Chat UI tool call output](screenshots/13-chat-ui-tool-call-output.png)
+
+See [`e2e-chatbot-app-next/README.md`](./e2e-chatbot-app-next/README.md) for how to run the chat UI locally and deploy it via Databricks Asset Bundles.
+
+## Bonus: ad-hoc querying via Claude Code + Databricks MCP
+
+For local development/debugging, the workspace also exposes a **remote MCP server** (SQL execute / read-only execute / poll result) that Claude Code can connect to directly using a Databricks PAT + MCP remote URL — useful for quick "what's my schema" / "list my tables" style questions against the workspace without leaving the terminal.
+
+![Claude Code MCP integration](screenshots/05-claude-code-mcp-integration.png)
+
+## Screenshots
+
+All diagrams and screenshots referenced above live in [`screenshots/`](./screenshots). Add or replace images there as the solution evolves — keep the numeric prefix so ordering in this README stays consistent, or update the image paths above if you rename/add files.

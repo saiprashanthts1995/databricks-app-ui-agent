@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(md5 *.png)",
+      "Bash(cp __TRACKED_VAR__/1.png screenshots/01-architecture-overview.png)",
+      "Bash(cp __TRACKED_VAR__/2.png screenshots/02-product-master-pipeline.png)",
+      "Bash(cp __TRACKED_VAR__/3.png screenshots/03-uc-function-tools-partial.png)",
+      "Bash(cp __TRACKED_VAR__/4.png screenshots/04-uc-function-tools.png)",
+      "Bash(cp __TRACKED_VAR__/5.png screenshots/05-claude-code-mcp-integration.png)",
+      "Bash(md5 __TRACKED_VAR__/14.png __TRACKED_VAR__/15.png screenshots/06-app-overview.png)",
+      "Bash(cp __TRACKED_VAR__/14.png screenshots/13-chat-ui-tool-call-output.png)"
+    ]
+  }
+}
